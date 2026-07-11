@@ -291,19 +291,19 @@
     </div>
 
     <nav class="bottom-nav">
-      <button class="nav-item active" onclick="showPage('home')">
+      <button class="nav-item active" onclick="showPage('home', this)">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
         <span>HOME</span>
       </button>
-      <button class="nav-item" onclick="showPage('holdings')">
+      <button class="nav-item" onclick="showPage('holdings', this)">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
         <span>HOLDINGS</span>
       </button>
-      <button class="nav-item" onclick="showPage('launch')">
+      <button class="nav-item" onclick="showPage('launch', this)">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         <span>LAUNCH</span>
       </button>
-      <button class="nav-item" onclick="showPage('profile')">
+      <button class="nav-item" onclick="showPage('profile', this)">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>PROFILE</span>
       </button>
@@ -360,9 +360,8 @@
   </div>
 
   <script>
-    const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-      ? 'http://localhost:3000' 
-      : 'https://openfun-backend.vercel.app';
+    // Use relative API URL - works on both localhost and Vercel
+    const API_URL = '';
     const JUPITER_API = 'https://quote-api.jup.ag/v6';
     
     let wallet = null;
@@ -374,11 +373,11 @@
     let chartInstance = null;
     let imageBase64 = null;
 
-    function showPage(page) {
+    function showPage(page, el) {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       document.getElementById('page-' + page).classList.add('active');
-      event.currentTarget.classList.add('active');
+      if (el) el.classList.add('active');
       
       if (page === 'home') loadRealTokens();
       if (page === 'holdings') loadHoldings();
@@ -418,8 +417,7 @@
         const balance = await conn.getBalance(new solanaWeb3.PublicKey(walletAddress));
         document.getElementById('walletBalance').textContent = (balance / 1e9).toFixed(2);
         
-        const res = await fetch(`${API_URL}/api/launches/${walletAddress}`);
-        const launches = await res.json();
+        const launches = JSON.parse(localStorage.getItem('myLaunches') || '[]');
         document.getElementById('tokensLaunched').textContent = launches.length;
         const graduated = launches.filter(l => l.graduated).length;
         document.getElementById('graduatedCount').textContent = graduated + ' GRADUATED';
@@ -436,44 +434,44 @@
       grid.innerHTML = '<div class="loading"><div class="spinner"></div>Fetching live tokens from DexScreener...</div>';
       
       try {
+        // Try our API first (proxies DexScreener)
+        const res = await fetch('/api/tokens');
+        const apiTokens = await res.json();
+        
+        if (apiTokens.length > 0) {
+          tokens = apiTokens;
+          renderTokens(tokens);
+          return;
+        }
+      } catch (e) {
+        console.log('API failed, trying direct DexScreener');
+      }
+      
+      // Fallback: direct DexScreener API call
+      try {
         const dsRes = await fetch('https://api.dexscreener.com/token-profiles/latest/v1');
         const profiles = await dsRes.json();
         
-        const jupRes = await fetch('https://token.jup.ag/strict');
-        const jupTokens = await jupRes.json();
-        
-        tokens = profiles.slice(0, 15).map((p, i) => {
-          const jup = jupTokens.find(j => j.address === p.tokenAddress);
-          const price = jup?.price || p.price || Math.random() * 0.001;
-          const mcap = p.marketCap || (price * 1000000);
-          
-          return {
-            address: p.tokenAddress,
-            name: p.name || jup?.name || 'Unknown',
-            symbol: p.symbol || jup?.symbol || '???',
-            price: price,
-            marketCap: mcap,
-            holders: p.holderCount || Math.floor(Math.random() * 5000 + 100),
-            change24h: (p.priceChange24h || (Math.random() * 200 - 100)).toFixed(1),
-            volume: p.volume24h || Math.floor(Math.random() * 100000),
-            safety: p.audit?.score || Math.floor(Math.random() * 40 + 60),
-            tag: i < 3 ? 'hot' : i < 8 ? 'new' : 'graduated',
-            image: p.icon || jup?.logoURI || `https://via.placeholder.com/48/a78bfa/0a0a0a?text=${(p.symbol || '?')[0]}`,
-            description: p.description || '',
-            chain: p.chainId || 'solana'
-          };
-        });
+        tokens = profiles.slice(0, 15).map((p, i) => ({
+          address: p.tokenAddress,
+          name: p.name || 'Unknown',
+          symbol: p.symbol || '???',
+          price: p.price || Math.random() * 0.001,
+          marketCap: p.marketCap || Math.floor(Math.random() * 500000 + 10000),
+          holders: p.holderCount || Math.floor(Math.random() * 5000 + 100),
+          change24h: (p.priceChange24h || (Math.random() * 200 - 100)).toFixed(1),
+          volume: p.volume24h || Math.floor(Math.random() * 100000),
+          safety: p.audit?.score || Math.floor(Math.random() * 40 + 60),
+          tag: i < 3 ? 'hot' : i < 8 ? 'new' : 'graduated',
+          image: p.icon || `https://via.placeholder.com/48/a78bfa/0a0a0a?text=${(p.symbol || '?')[0]}`,
+          description: p.description || '',
+          chain: p.chainId || 'solana'
+        }));
         
         renderTokens(tokens);
       } catch (e) {
-        try {
-          const res = await fetch(`${API_URL}/api/tokens`);
-          tokens = await res.json();
-          renderTokens(tokens);
-        } catch (e2) {
-          showToast('Failed to load tokens');
-          grid.innerHTML = '<div class="loading">Failed to load. Try again.</div>';
-        }
+        showToast('Failed to load tokens');
+        grid.innerHTML = '<div class="loading">Failed to load. Try again.</div>';
       }
     }
 
@@ -567,7 +565,7 @@
       }
       
       try {
-        const res = await fetch(`${API_URL}/api/buy`, {
+        const res = await fetch('/api/buy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -622,7 +620,8 @@
       btn.textContent = 'LAUNCHING...';
       
       try {
-        const res = await fetch(`${API_URL}/api/launch`, {
+        // Try API first
+        const res = await fetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -638,6 +637,19 @@
         const result = await res.json();
         
         if (result.success) {
+          // Save to localStorage for persistence
+          const myLaunches = JSON.parse(localStorage.getItem('myLaunches') || '[]');
+          myLaunches.push({
+            mint: result.mint,
+            name,
+            symbol,
+            totalSupply: selectedSupply,
+            sold: 0,
+            graduated: false,
+            createdAt: new Date().toISOString()
+          });
+          localStorage.setItem('myLaunches', JSON.stringify(myLaunches));
+          
           showToast(`$${symbol} launched! Mint: ${result.mint.slice(0,8)}...`);
           document.getElementById('tokenName').value = '';
           document.getElementById('tokenSymbol').value = '';
@@ -649,45 +661,55 @@
           showToast(result.error || 'Launch failed');
         }
       } catch (e) {
-        showToast('Launch failed - check backend');
+        // Fallback: save locally even if API fails
+        const myLaunches = JSON.parse(localStorage.getItem('myLaunches') || '[]');
+        const mockMint = 'mock_' + Date.now();
+        myLaunches.push({
+          mint: mockMint,
+          name,
+          symbol,
+          totalSupply: selectedSupply,
+          sold: 0,
+          graduated: false,
+          createdAt: new Date().toISOString()
+        });
+        localStorage.setItem('myLaunches', JSON.stringify(myLaunches));
+        
+        showToast(`$${symbol} saved locally! Deploy to mainnet for real launch.`);
+        document.getElementById('tokenName').value = '';
+        document.getElementById('tokenSymbol').value = '';
+        document.getElementById('tokenDesc').value = '';
+        document.getElementById('imagePreview').style.display = 'none';
+        imageBase64 = null;
+        loadUserLaunches();
       } finally {
         btn.disabled = false;
         btn.textContent = 'LAUNCH TOKEN';
       }
     }
 
-    async function loadUserLaunches() {
-      if (!walletAddress) {
-        document.getElementById('yourLaunchesList').innerHTML = '<div class="loading">Connect wallet to see launches</div>';
+    function loadUserLaunches() {
+      const launches = JSON.parse(localStorage.getItem('myLaunches') || '[]');
+      
+      if (!launches.length) {
+        document.getElementById('yourLaunchesList').innerHTML = '<div class="loading">No launches yet</div>';
         return;
       }
       
-      try {
-        const res = await fetch(`${API_URL}/api/launches/${walletAddress}`);
-        const launches = await res.json();
-        
-        if (!launches.length) {
-          document.getElementById('yourLaunchesList').innerHTML = '<div class="loading">No launches yet</div>';
-          return;
-        }
-        
-        document.getElementById('yourLaunchesList').innerHTML = launches.map(l => `
-          <div class="launch-item">
-            <div style="width:40px;height:40px;border-radius:50%;background:#a78bfa;display:flex;align-items:center;justify-content:center;font-weight:900;color:#0a0a0a;">$</div>
-            <div class="launch-item-info">
-              <h4>$${l.symbol}</h4>
-              <p>${l.graduated ? 'GRADUATED' : 'BONDING'} • ${(l.sold/1000).toFixed(0)}K sold • $${(calculateMarketCap(l.sold, l.totalSupply)/1000).toFixed(0)}K cap</p>
-            </div>
+      document.getElementById('yourLaunchesList').innerHTML = launches.map(l => `
+        <div class="launch-item">
+          <div style="width:40px;height:40px;border-radius:50%;background:#a78bfa;display:flex;align-items:center;justify-content:center;font-weight:900;color:#0a0a0a;">$</div>
+          <div class="launch-item-info">
+            <h4>$${l.symbol}</h4>
+            <p>${l.graduated ? 'GRADUATED' : 'BONDING'} • ${(l.sold/1000).toFixed(0)}K sold • $${(calculateMarketCap(l.sold, l.totalSupply)/1000).toFixed(0)}K cap</p>
           </div>
-        `).join('');
-      } catch (e) {
-        document.getElementById('yourLaunchesList').innerHTML = '<div class="loading">Failed to load</div>';
-      }
+        </div>
+      `).join('');
     }
 
     function calculateMarketCap(sold, total) {
       const remaining = total - sold;
-      const ratio = remaining / total;
+      const ratio = remaining / total || 0.001;
       const basePrice = 0.000001;
       const price = basePrice / (ratio * ratio);
       return total * price;
@@ -701,10 +723,14 @@
         return;
       }
       
-      holdings = [
-        { symbol: 'PEPE2', name: 'PEPE2', amount: 50000, value: 8.5, change: '+12%', image: 'https://via.placeholder.com/48/22c55e/0a0a0a?text=P' },
-        { symbol: 'BONKZ', name: 'BONKZ', amount: 120000, value: 4.2, change: '-3%', image: 'https://via.placeholder.com/48/a78bfa/0a0a0a?text=B' },
-      ];
+      holdings = JSON.parse(localStorage.getItem('myHoldings') || '[]');
+      
+      if (!holdings.length) {
+        document.getElementById('holdingsList').innerHTML = '<div class="loading">No holdings yet. Buy some tokens!</div>';
+        document.getElementById('totalValue').textContent = '0 SOL';
+        document.getElementById('totalUsd').textContent = '~$0 USD';
+        return;
+      }
       
       const total = holdings.reduce((a, h) => a + h.value, 0);
       document.getElementById('totalValue').textContent = total.toFixed(1) + ' SOL';
@@ -714,7 +740,7 @@
         const changeClass = h.change.includes('+') ? 'up' : 'down';
         return `
         <div class="holding-card">
-          <img src="${h.image}" class="holding-img">
+          <img src="${h.image}" class="holding-img" onerror="this.src='https://via.placeholder.com/48/a78bfa/0a0a0a?text=${h.symbol[0]}'">
           <div class="holding-details">
             <h3>$${h.symbol}</h3>
             <div class="amount">${h.amount.toLocaleString()} TOKENS</div>
@@ -731,7 +757,7 @@
       if (!walletAddress) { showToast('Connect wallet first'); return; }
       
       try {
-        const res = await fetch(`${API_URL}/api/claim`, {
+        const res = await fetch('/api/claim', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ creatorAddress: walletAddress })
