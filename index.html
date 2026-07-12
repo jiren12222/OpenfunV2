@@ -446,21 +446,21 @@
     }
 
     function createInitializeMintInstruction(mint, decimals, mintAuthority, freezeAuthority, programId) {
-      const keys = [
-        { pubkey: mint, isSigner: false, isWritable: true }
-      ];
-      const data = Buffer.alloc(67);
-      data.writeUInt8(0, 0);
-      data.writeUInt8(decimals, 1);
-      data.writeUInt8(1, 2);
-      mintAuthority.toBuffer().copy(data, 3);
+      const keys = [{ pubkey: mint, isSigner: false, isWritable: true }];
+      const mintAuthBytes = mintAuthority.toBytes();
+      const data = new Uint8Array(67);
+      data[0] = 0;
+      data[1] = decimals;
+      data[2] = 1;
+      data.set(mintAuthBytes, 3);
       if (freezeAuthority) {
-        data.writeUInt8(1, 35);
-        freezeAuthority.toBuffer().copy(data, 36);
+        data[35] = 1;
+        data.set(freezeAuthority.toBytes(), 36);
+        return new solanaWeb3.TransactionInstruction({ keys, programId, data: data.slice(0, 67) });
       } else {
-        data.writeUInt8(0, 35);
+        data[35] = 0;
+        return new solanaWeb3.TransactionInstruction({ keys, programId, data: data.slice(0, 35) });
       }
-      return new solanaWeb3.TransactionInstruction({ keys, programId, data: data.slice(0, freezeAuthority ? 67 : 35) });
     }
 
     function createAssociatedTokenAccountInstruction(payer, associatedToken, owner, mint, programId, associatedProgramId) {
@@ -472,7 +472,7 @@
         { pubkey: solanaWeb3.SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: programId, isSigner: false, isWritable: false }
       ];
-      return new solanaWeb3.TransactionInstruction({ keys, programId: associatedProgramId, data: Buffer.alloc(0) });
+      return new solanaWeb3.TransactionInstruction({ keys, programId: associatedProgramId, data: new Uint8Array(0) });
     }
 
     function createMintToInstruction(mint, destination, authority, amount, programId) {
@@ -481,12 +481,20 @@
         { pubkey: destination, isSigner: false, isWritable: true },
         { pubkey: authority, isSigner: true, isWritable: false }
       ];
-      const data = Buffer.alloc(9);
-      data.writeUInt8(7, 0);
-      const bigAmount = BigInt.asUintN(64, BigInt(amount));
+      const data = new Uint8Array(9);
+      data[0] = 7;
       const view = new DataView(data.buffer);
-      view.setBigUint64(1, bigAmount, true);
+      view.setBigUint64(1, BigInt.asUintN(64, BigInt(amount)), true);
       return new solanaWeb3.TransactionInstruction({ keys, programId, data });
+    }
+
+    function base64ToUint8Array(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
     }
 
     const PLATFORM_FEE_BPS = 0;
@@ -679,8 +687,8 @@
         const swapData = await swapResp.json();
         if (swapData.error) throw new Error(swapData.error);
         btn.textContent = 'SIGNING...';
-        const txBuffer = Buffer.from(swapData.swapTransaction, 'base64');
-        const transaction = solanaWeb3.VersionedTransaction.deserialize(txBuffer);
+        const txBytes = base64ToUint8Array(swapData.swapTransaction);
+        const transaction = solanaWeb3.VersionedTransaction.deserialize(txBytes);
         const signed = await currentWallet.signTransaction(transaction);
         btn.textContent = 'SENDING...';
         const signature = await connection.sendRawTransaction(signed.serialize(), {
